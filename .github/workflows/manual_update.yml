@@ -28,3 +28,18 @@ jobs:
           MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
         run: |
           python update_env.py "${{ github.event.inputs.stock_code }}"
+
+      - name: Trigger Daily Analysis
+        env:
+          GH_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+        run: |
+          echo "🚀 .env updated. Triggering Daily Analysis (Full Mode)..."
+          
+          # 休息 5 秒，确保 GitHub 数据库同步了刚才的文件修改
+          sleep 5 
+          
+          # 核心命令：
+          # -f mode=full  <-- 这里对应你 daily_analysis.yml 里的 input 参数
+          # daily_analysis.yml <-- 确保这里的名字和你真实的文件名一模一样
+          gh workflow run daily_analysis.yml --ref main -f mode=full
+
