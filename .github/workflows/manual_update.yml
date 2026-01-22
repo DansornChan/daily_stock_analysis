@@ -41,5 +41,5 @@ jobs:
           # 核心命令：
           # -f mode=full  <-- 这里对应你 daily_analysis.yml 里的 input 参数
           # daily_analysis.yml <-- 确保这里的名字和你真实的文件名一模一样
-          gh workflow run daily_analysis.yml --ref main -f mode=full
+          gh workflow run daily_analysis.yml --ref main -f mode=stock-only
 
