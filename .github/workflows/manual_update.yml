@@ -1,0 +1,30 @@
+name: Manual Update Stock
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_code:
+        description: 'Stock Code (e.g. 600519)'
+        required: true
+        default: '600519'
+
+jobs:
+  update-env:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install PyGithub
+        run: pip install PyGithub
+
+      - name: Run Update Script
+        env:
+          MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+        run: |
+          python update_env.py "${{ github.event.inputs.stock_code }}"
