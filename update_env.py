@@ -6,7 +6,7 @@ from github import Github # 依赖 PyGithub
 # 从 GitHub Action 的环境变量里获取 Token 和 仓库名
 # 稍后我们在设置里配置这些
 GITHUB_TOKEN = os.environ.get("MY_GITHUB_TOKEN")
-REPO_NAME = os.environ.get("GITHUB_REPOSITORY") 
+REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
 FILE_PATH = ".env"
 TARGET_VAR = "STOCK_LIST"
 
