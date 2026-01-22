@@ -9,35 +9,23 @@ REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
 FILE_PATH = ".env"
 TARGET_VAR = "STOCK_LIST"
 
-def format_ashare_code(code):
-    # 格式化 A 股代码
-    code = str(code).strip()
-    if "." in code: 
-        return code.upper()
-    if code.startswith("6"): 
-        return f"{code}.SS"
-    elif code.startswith("0") or code.startswith("3"): 
-        return f"{code}.SZ"
-    return code
-
 def update_file():
     # 1. 检查参数
     if len(sys.argv) < 2:
         print("Error: No stock code provided")
         return
     
-    # 清洗参数，防止隐形字符
-    raw_code = sys.argv[1]
-    new_code = format_ashare_code(raw_code.replace('\xa0', '').strip())
+    # 获取原始代码，去掉可能的隐形字符，不做任何后缀修改
+    # Akshare/Efinance 通常只需要 6 位数字
+    new_code = sys.argv[1].strip().replace('\xa0', '')
     
     print(f"Updating .env to: {new_code}")
 
-    # 2. 检查 Token
+    # 2. 连接 GitHub
     if not GITHUB_TOKEN:
         print("Error: MY_GITHUB_TOKEN is missing")
         return
 
-    # 3. 连接 GitHub
     g = Github(GITHUB_TOKEN)
     try:
         repo = g.get_repo(REPO_NAME)
@@ -47,7 +35,7 @@ def update_file():
         print(f"Error reading .env: {e}")
         return
 
-    # 4. 正则替换内容
+    # 3. 正则替换
     new_content = re.sub(
         fr"^{TARGET_VAR}=.*", 
         f"{TARGET_VAR}={new_code}", 
@@ -59,7 +47,7 @@ def update_file():
         print("No changes needed.")
         return
 
-    # 5. 提交修改
+    # 4. 提交
     repo.update_file(
         path=contents.path,
         message=f"Bot Update: {new_code}",
