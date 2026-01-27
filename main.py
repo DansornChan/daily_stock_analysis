@@ -34,6 +34,7 @@ import argparse
 import logging
 import sys
 import time
+import json  # <--- 新增这一行
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date, timezone, timedelta
 from logging.handlers import RotatingFileHandler
@@ -120,6 +121,27 @@ def setup_logging(debug: bool = False, log_dir: str = "./logs") -> None:
 
 logger = logging.getLogger(__name__)
 
+# ==========================================
+# 新增配置：股票行业映射表 (用于 TrendRadar 新闻匹配)
+# Key: 股票代码 (去除后缀), Value: 行业标签
+# 标签必须是: Tech, Energy, Consumer, Finance, Healthcare, Macro
+# ==========================================
+STOCK_SECTOR_MAP = {
+    # 你的持仓示例
+    "603098": "Industrial", # 森特股份
+    "NVDA": "Tech",
+    "AAPL": "Tech",
+    "TSLA": "Energy",       # 或 Tech/Auto
+    "00700": "Tech",        # 腾讯
+    "600519": "Consumer",   # 茅台
+    "BTC": "Crypto",        # 加密货币
+    
+    # 指数/ETF 默认归为宏观
+    "SPY": "Macro",
+    "QQQ": "Macro",
+    "300300": "Macro"
+}
+DEFAULT_SECTOR = "Macro" # 查不到的默认归为宏观
 
 class StockAnalysisPipeline:
     """
@@ -145,6 +167,45 @@ class StockAnalysisPipeline:
         """
         self.config = config or get_config()
         self.max_workers = max_workers or self.config.max_workers
+
+        # === 新增方法：读取并筛选 TrendRadar 新闻 ===
+    def _get_trend_radar_context(self, code: str, json_path: str = 'news_summary.json') -> str:
+        """
+        读取上游 Action 生成的新闻文件，并根据行业进行筛选
+        """
+        if not os.path.exists(json_path):
+            return ""
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                news_items = json.load(f)
+            
+            # 1. 确定当前股票的板块
+            # 简单处理：如果代码包含后缀（如 603098.SS），尝试去后缀匹配
+            clean_code = code.split('.')[0] 
+            target_sector = STOCK_SECTOR_MAP.get(clean_code, DEFAULT_SECTOR)
+            
+            # 2. 筛选逻辑：保留 Macro (宏观) 和 Target Sector (目标板块)
+            filtered_news = []
+            for item in news_items:
+                # 兼容处理：防止字段缺失，默认为 Macro
+                category = item.get('category', 'Macro') 
+                
+                if category == 'Macro' or category == target_sector:
+                    title = item.get('title', '无标题')
+                    summary = item.get('summary', '')
+                    # 格式化输出
+                    filtered_news.append(f"- 【{category}】{title}: {summary}")
+
+            if not filtered_news:
+                return ""
+            
+            return "【来自 TrendRadar 的行业与宏观简报】\n" + "\n".join(filtered_news) + "\n"
+            
+        except Exception as e:
+            logger.warning(f"[{code}] 读取 TrendRadar 新闻失败: {e}")
+            return ""
+    # ==========================================
         
         # 初始化各模块
         self.db = get_db()
@@ -301,6 +362,16 @@ class StockAnalysisPipeline:
                     logger.debug(f"[{code}] 情报搜索结果:\n{news_context}")
             else:
                 logger.info(f"[{code}] 搜索服务不可用，跳过情报搜索")
+
+            # === 【插入点】注入 TrendRadar 新闻上下文 ===
+        trend_news = self._get_trend_radar_context(code)
+        if trend_news:
+            logger.info(f"[{code}] 已注入 TrendRadar 行业舆情")
+            # 将新闻拼接到 news_context 中
+            if 'news_context' not in locals() or news_context is None:
+                news_context = ""
+            news_context = trend_news + "\n" + news_context
+        # ========================================
             
             # Step 5: 获取分析上下文（技术面数据）
             context = self.db.get_analysis_context(code)
