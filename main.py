@@ -34,7 +34,7 @@ import argparse
 import logging
 import sys
 import time
-import json  # <--- 新增这一行
+import json  # <--- 已添加
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date, timezone, timedelta
 from logging.handlers import RotatingFileHandler
@@ -167,8 +167,30 @@ class StockAnalysisPipeline:
         """
         self.config = config or get_config()
         self.max_workers = max_workers or self.config.max_workers
+        
+        # 初始化各模块
+        self.db = get_db()
+        self.fetcher_manager = DataFetcherManager()
+        self.akshare_fetcher = AkshareFetcher()  # 用于获取增强数据（量比、筹码等）
+        self.trend_analyzer = StockTrendAnalyzer()  # 趋势分析器
+        self.analyzer = GeminiAnalyzer()
+        self.notifier = NotificationService()
+        
+        # 初始化搜索服务
+        self.search_service = SearchService(
+            bocha_keys=self.config.bocha_api_keys,
+            tavily_keys=self.config.tavily_api_keys,
+            serpapi_keys=self.config.serpapi_keys,
+        )
+        
+        logger.info(f"调度器初始化完成，最大并发数: {self.max_workers}")
+        logger.info("已启用趋势分析器 (MA5>MA10>MA20 多头判断)")
+        if self.search_service.is_available:
+            logger.info("搜索服务已启用 (Tavily/SerpAPI)")
+        else:
+            logger.warning("搜索服务未启用（未配置 API Key）")
 
-        # === 新增方法：读取并筛选 TrendRadar 新闻 ===
+    # === 新增方法：读取并筛选 TrendRadar 新闻 ===
     def _get_trend_radar_context(self, code: str, json_path: str = 'news_summary.json') -> str:
         """
         读取上游 Action 生成的新闻文件，并根据行业进行筛选
@@ -206,28 +228,6 @@ class StockAnalysisPipeline:
             logger.warning(f"[{code}] 读取 TrendRadar 新闻失败: {e}")
             return ""
     # ==========================================
-        
-        # 初始化各模块
-        self.db = get_db()
-        self.fetcher_manager = DataFetcherManager()
-        self.akshare_fetcher = AkshareFetcher()  # 用于获取增强数据（量比、筹码等）
-        self.trend_analyzer = StockTrendAnalyzer()  # 趋势分析器
-        self.analyzer = GeminiAnalyzer()
-        self.notifier = NotificationService()
-        
-        # 初始化搜索服务
-        self.search_service = SearchService(
-            bocha_keys=self.config.bocha_api_keys,
-            tavily_keys=self.config.tavily_api_keys,
-            serpapi_keys=self.config.serpapi_keys,
-        )
-        
-        logger.info(f"调度器初始化完成，最大并发数: {self.max_workers}")
-        logger.info("已启用趋势分析器 (MA5>MA10>MA20 多头判断)")
-        if self.search_service.is_available:
-            logger.info("搜索服务已启用 (Tavily/SerpAPI)")
-        else:
-            logger.warning("搜索服务未启用（未配置 API Key）")
     
     def fetch_and_save_stock_data(
         self, 
@@ -278,20 +278,6 @@ class StockAnalysisPipeline:
     def analyze_stock(self, code: str) -> Optional[AnalysisResult]:
         """
         分析单只股票（增强版：含量比、换手率、筹码分析、多维度情报）
-        
-        流程：
-        1. 获取实时行情（量比、换手率）
-        2. 获取筹码分布
-        3. 进行趋势分析（基于交易理念）
-        4. 多维度情报搜索（最新消息+风险排查+业绩预期）
-        5. 从数据库获取分析上下文
-        6. 调用 AI 进行综合分析
-        
-        Args:
-            code: 股票代码
-            
-        Returns:
-            AnalysisResult 或 None（如果分析失败）
         """
         try:
             # 获取股票名称（优先从实时行情获取真实名称）
@@ -363,15 +349,15 @@ class StockAnalysisPipeline:
             else:
                 logger.info(f"[{code}] 搜索服务不可用，跳过情报搜索")
 
-            # === 【插入点】注入 TrendRadar 新闻上下文 ===
-        trend_news = self._get_trend_radar_context(code)
-        if trend_news:
-            logger.info(f"[{code}] 已注入 TrendRadar 行业舆情")
-            # 将新闻拼接到 news_context 中
-            if 'news_context' not in locals() or news_context is None:
-                news_context = ""
-            news_context = trend_news + "\n" + news_context
-        # ========================================
+            # === 【插入点】注入 TrendRadar 新闻上下文 (修复缩进错误) ===
+            trend_news = self._get_trend_radar_context(code)
+            if trend_news:
+                logger.info(f"[{code}] 已注入 TrendRadar 行业舆情")
+                # 将新闻拼接到 news_context 中
+                if news_context is None:
+                    news_context = ""
+                news_context = trend_news + "\n" + news_context
+            # ========================================
             
             # Step 5: 获取分析上下文（技术面数据）
             context = self.db.get_analysis_context(code)
@@ -411,16 +397,6 @@ class StockAnalysisPipeline:
         增强分析上下文
         
         将实时行情、筹码分布、趋势分析结果、股票名称添加到上下文中
-        
-        Args:
-            context: 原始上下文
-            realtime_quote: 实时行情数据
-            chip_data: 筹码分布数据
-            trend_result: 趋势分析结果
-            stock_name: 股票名称
-            
-        Returns:
-            增强后的上下文
         """
         enhanced = context.copy()
         
@@ -501,22 +477,6 @@ class StockAnalysisPipeline:
     ) -> Optional[AnalysisResult]:
         """
         处理单只股票的完整流程
-        
-        包括：
-        1. 获取数据
-        2. 保存数据
-        3. AI 分析
-        4. 单股推送（可选，#55）
-        
-        此方法会被线程池调用，需要处理好异常
-        
-        Args:
-            code: 股票代码
-            skip_analysis: 是否跳过 AI 分析
-            single_stock_notify: 是否启用单股推送模式（每分析完一只立即推送）
-            
-        Returns:
-            AnalysisResult 或 None
         """
         logger.info(f"========== 开始处理 {code} ==========")
         
@@ -567,20 +527,6 @@ class StockAnalysisPipeline:
     ) -> List[AnalysisResult]:
         """
         运行完整的分析流程
-        
-        流程：
-        1. 获取待分析的股票列表
-        2. 使用线程池并发处理
-        3. 收集分析结果
-        4. 发送通知
-        
-        Args:
-            stock_codes: 股票代码列表（可选，默认使用配置中的自选股）
-            dry_run: 是否仅获取数据不分析
-            send_notification: 是否发送推送通知
-            
-        Returns:
-            分析结果列表
         """
         start_time = time.time()
         
@@ -657,12 +603,6 @@ class StockAnalysisPipeline:
     def _send_notifications(self, results: List[AnalysisResult], skip_push: bool = False) -> None:
         """
         发送分析结果通知
-        
-        生成决策仪表盘格式的报告
-        
-        Args:
-            results: 分析结果列表
-            skip_push: 是否跳过推送（仅保存到本地，用于单股推送模式）
         """
         try:
             logger.info("生成决策仪表盘日报...")
@@ -809,14 +749,6 @@ def parse_arguments() -> argparse.Namespace:
 def run_market_review(notifier: NotificationService, analyzer=None, search_service=None) -> Optional[str]:
     """
     执行大盘复盘分析
-    
-    Args:
-        notifier: 通知服务
-        analyzer: AI分析器（可选）
-        search_service: 搜索服务（可选）
-    
-    Returns:
-        复盘报告文本
     """
     logger.info("开始执行大盘复盘分析...")
     
