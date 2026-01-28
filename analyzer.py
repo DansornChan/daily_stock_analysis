@@ -42,15 +42,20 @@ class GeminiAnalyzer:
             )
 
     def generate_cio_prompt(self, stock_info: dict, tech_data: dict, trend_context: dict) -> str:
+        """生成 AI-CIO 专用提示词 (防御增强版)"""
         macro_text = trend_context.get('macro', '无重大消息')
         sector_text = trend_context.get('sector', '无重大消息')
+        
+        # 使用 .get() 确保安全
+        stock_name = stock_info.get('name', '未知股票')
+        stock_code = stock_info.get('code', 'Unknown')
         
         return f"""
         你是一位资深基金经理(CIO)。请基于以下数据进行自上而下的深度复盘：
         
         【宏观/行业背景】: {macro_text} | {sector_text}
-        【个股技术面】: {stock_info['name']}({stock_info['code']}) 现价{tech_data.get('price')}
-        指标: MA5/20/60={tech_data.get('ma5')}/{tech_data.get('ma20')}/{tech_data.get('ma60')}, RSI={tech_data.get('rsi')}, MACD={tech_data.get('macd')}
+        【个股技术面】: {stock_name}({stock_code}) 现价{tech_data.get('price', 'N/A')}
+        指标: MA5/20/60={tech_data.get('ma5', 0):.2f}/{tech_data.get('ma20', 0):.2f}/{tech_data.get('ma60', 0):.2f}, RSI={tech_data.get('rsi', 0):.2f}, MACD={tech_data.get('macd', 0):.2f}
         
         请输出：
         1. 评分: 0-100
