@@ -378,9 +378,11 @@ class NotificationService:
                 ])
             
             # 风险提示
-            if hasattr(result, 'risk_warning') and result.risk_warning:
+            # 使用 getattr 安全获取，如果字段不存在则返回 None
+            risk_warning = getattr(result, 'risk_warning', None)
+            if risk_warning:
                 report_lines.extend([
-                    f"⚠️ **风险提示**：{result.risk_warning}",
+                    f"**⚠️ 风险提示**: {risk_warning}",
                     "",
                 ])
             
