@@ -196,10 +196,12 @@ class StockAnalysisPipeline:
             if skip_analysis: return None
 
             # 2. 准备素材
-            stock_info = self.portfolio.get(fetch_code, {"name": f"A股{fetch_code}", "sector": DEFAULT_SECTOR})
-            df, _ = self.fetcher_manager.get_daily_data(fetch_code, days=100)
-            tech_data = self._calculate_technical_indicators(df)
-            trend_context = self._get_trend_radar_context(fetch_code)
+            stock_info = self.portfolio.get(fetch_code, {
+                "name": f"A股{fetch_code}", 
+                "sector": DEFAULT_SECTOR,
+                "code": fetch_code,  # <--- 补上缺失的 code 字段
+                "strategy": "未定义"
+            })
             
             # 3. AI 分析
             prompt = self.analyzer.generate_cio_prompt(stock_info, tech_data, trend_context)
