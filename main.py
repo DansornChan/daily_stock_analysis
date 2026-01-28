@@ -26,7 +26,6 @@ LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 DEFAULT_SECTOR = "Macro"
 
 def setup_logging(debug: bool = False, log_dir: str = "./logs") -> None:
-    level = logging.DEBUG if debug else logging.INFO
     log_path = Path(log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
 
@@ -54,6 +53,7 @@ logger = logging.getLogger(__name__)
 class StockAnalysisPipeline:
     def __init__(self, config: Optional[Config] = None, max_workers: Optional[int] = None):
         self.config = config or get_config()
+
         env_workers = os.getenv("MAX_CONCURRENT")
         self.max_workers = int(env_workers) if env_workers else (max_workers or self.config.max_workers or 1)
 
@@ -63,16 +63,16 @@ class StockAnalysisPipeline:
         self.analyzer = GeminiAnalyzer()
         self.notifier = NotificationService()
 
-        logger.info(f"AI-CIO 初始化完成 | 并发数: {self.max_workers}")
+        logger.info(f"AI-CIO 初始化完成 | 并发数={self.max_workers}")
 
     # ---------- 配置 ----------
 
     def _load_portfolio_config(self) -> dict:
-        json_path = "portfolio.json"
-        if not os.path.exists(json_path):
+        path = "portfolio.json"
+        if not os.path.exists(path):
             return {}
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"加载 portfolio.json 失败: {e}")
@@ -80,30 +80,32 @@ class StockAnalysisPipeline:
 
     # ---------- 新闻上下文 ----------
 
-    def _get_trend_radar_context(self, code: str, json_path: str = 'news_summary.json') -> dict:
-        context = {'macro': "", 'sector': "", 'target_sector': DEFAULT_SECTOR}
+    def _get_trend_radar_context(self, code: str, json_path: str = "news_summary.json") -> dict:
+        context = {"macro": "", "sector": "", "target_sector": DEFAULT_SECTOR}
         stock_info = self.portfolio.get(code, {})
-        target_sector = stock_info.get('sector', DEFAULT_SECTOR)
-        context['target_sector'] = target_sector
+        target_sector = stock_info.get("sector", DEFAULT_SECTOR)
+        context["target_sector"] = target_sector
 
         if not os.path.exists(json_path):
             return context
 
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 news_items = json.load(f)
 
             macro_news, sector_news = [], []
             for item in news_items:
-                cat = item.get('category', 'Macro')
+                cat = item.get("category", "Macro")
                 line = f"- {item.get('title', '')}: {item.get('summary', '')}"
-                if cat in ['Macro', 'Finance']:
+                if cat in ["Macro", "Finance"]:
                     macro_news.append(line)
                 if cat == target_sector:
                     sector_news.append(line)
 
-            context['macro'] = "\n".join(macro_news) if macro_news else "当前宏观面平静。"
-            context['sector'] = "\n".join(sector_news) if sector_news else f"当前{target_sector}板块无重大消息。"
+            context["macro"] = "\n".join(macro_news) if macro_news else "当前宏观面平静。"
+            context["sector"] = (
+                "\n".join(sector_news) if sector_news else f"当前{target_sector}板块无重大消息。"
+            )
             return context
         except Exception as e:
             logger.warning(f"读取新闻上下文失败: {e}")
@@ -116,8 +118,8 @@ class StockAnalysisPipeline:
             return {}
 
         try:
-            df = df.sort_values('date')
-            close = df['close']
+            df = df.sort_values("date")
+            close = df["close"]
 
             ma5 = close.rolling(5).mean().iloc[-1]
             ma20 = close.rolling(20).mean().iloc[-1]
@@ -141,8 +143,8 @@ class StockAnalysisPipeline:
                 "rsi": rsi,
                 "macd": macd,
                 "macd_signal": signal,
-                "support": df['low'].tail(20).min(),
-                "resistance": df['high'].tail(20).max()
+                "support": df["low"].tail(20).min(),
+                "resistance": df["high"].tail(20).max(),
             }
         except Exception as e:
             logger.warning(f"技术指标计算失败: {e}")
@@ -164,19 +166,19 @@ class StockAnalysisPipeline:
     # ---------- 单股处理 ----------
 
     def process_single_stock(self, code: str, dry_run: bool = False) -> Optional[AnalysisResult]:
-        match = re.search(r'\d{6}', code)
+        match = re.search(r"\d{6}", code)
         if not match:
             return None
 
         stock_code = match.group(0)
-        logger.info(f"========== 开始处理 A 股: {stock_code} ==========")
+        logger.info(f"========== 处理 A 股: {stock_code} ==========")
 
         try:
-            # 轻量限流（抓行情前）
-            time.sleep(2)
+            time.sleep(2)  # 轻量限流
 
             df = self.fetch_and_save_stock_data(stock_code)
             if df is None:
+                logger.error(f"[{stock_code}] 无行情数据，跳过")
                 return None
 
             if dry_run:
@@ -184,8 +186,7 @@ class StockAnalysisPipeline:
                 return None
 
             stock_info = self.portfolio.get(
-                stock_code,
-                {"name": f"A股{stock_code}", "sector": DEFAULT_SECTOR}
+                stock_code, {"name": f"A股{stock_code}", "sector": DEFAULT_SECTOR}
             )
             stock_info.setdefault("code", stock_code)
 
@@ -194,29 +195,31 @@ class StockAnalysisPipeline:
 
             prompt = self.analyzer.generate_cio_prompt(stock_info, tech_data, trend_context)
 
-            base_context = {
+            context = {
                 "code": stock_code,
                 "stock_name": stock_info.get("name", stock_code),
-                "date": date.today().strftime('%Y-%m-%d')
+                "date": date.today().strftime("%Y-%m-%d"),
             }
 
-            result = self.analyzer.analyze(base_context, custom_prompt=prompt)
-            if result:
-                logger.info(f"[{stock_code}] AI 分析完成")
+            result = self.analyzer.analyze(context, custom_prompt=prompt)
+            if result is None:
+                logger.error(f"[{stock_code}] AI 返回为空，已丢弃")
+                return None
 
+            logger.info(f"[{stock_code}] AI 分析完成")
             return result
 
         except Exception as e:
             logger.exception(f"[{stock_code}] 处理异常: {e}")
             return None
 
-    # ---------- 执行 ----------
+    # ---------- 主执行 ----------
 
     def run(
         self,
         stock_codes: Optional[List[str]] = None,
         dry_run: bool = False,
-        send_notification: bool = True
+        send_notification: bool = True,
     ) -> List[AnalysisResult]:
 
         if stock_codes is None:
@@ -225,31 +228,39 @@ class StockAnalysisPipeline:
         results: List[AnalysisResult] = []
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {
+            future_map = {
                 executor.submit(self.process_single_stock, code, dry_run): code
                 for code in stock_codes
             }
-            for future in as_completed(futures):
-                res = future.result()
-                if res:
-                    results.append(res)
+
+            for future in as_completed(future_map):
+                try:
+                    res = future.result()
+                    if res:
+                        results.append(res)
+                except Exception as e:
+                    logger.exception(f"子线程异常: {e}")
 
         if results and send_notification and not dry_run:
-            report = self.notifier.generate_dashboard_report(results)
-            if self.notifier.is_available():
-                self.notifier.send_to_telegram(report)
+            try:
+                report = self.notifier.generate_dashboard_report(results)
+                if self.notifier.is_available():
+                    self.notifier.send_to_telegram(report)
+            except Exception as e:
+                logger.exception(f"发送通知失败，但不影响流程: {e}")
 
+        logger.info(f"本次运行完成 | 成功分析 {len(results)} 只股票")
         return results
 
 # ================= CLI =================
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='AI-CIO')
-    parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--dry-run', action='store_true', help='仅抓取数据，不进行 AI 分析')
-    parser.add_argument('--stocks', type=str)
-    parser.add_argument('--no-notify', action='store_true')
-    parser.add_argument('--workers', type=int)
+    parser = argparse.ArgumentParser(description="AI-CIO")
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--dry-run", action="store_true", help="仅抓取数据，不进行 AI 分析")
+    parser.add_argument("--stocks", type=str)
+    parser.add_argument("--no-notify", action="store_true")
+    parser.add_argument("--workers", type=int)
     return parser.parse_args()
 
 def main():
@@ -257,13 +268,13 @@ def main():
     config = get_config()
     setup_logging(args.debug, config.log_dir)
 
-    cmd_stocks = [c.strip() for c in args.stocks.split(',')] if args.stocks else None
+    stock_list = [s.strip() for s in args.stocks.split(",")] if args.stocks else None
 
     pipeline = StockAnalysisPipeline(config, max_workers=args.workers)
     pipeline.run(
-        stock_codes=cmd_stocks,
+        stock_codes=stock_list,
         dry_run=args.dry_run,
-        send_notification=not args.no_notify
+        send_notification=not args.no_notify,
     )
     return 0
 
