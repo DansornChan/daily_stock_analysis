@@ -66,37 +66,44 @@ class GeminiAnalyzer:
         4. 详细逻辑: 结合宏观与技术面。
         """
 
-    def analyze(self, context: Dict[str, Any], custom_prompt: Optional[str] = None) -> Optional[AnalysisResult]:
+   def analyze(self, context: Dict[str, Any], custom_prompt: Optional[str] = None) -> Optional[AnalysisResult]:
         if not self.llm: return None
         try:
             # 执行 AI 调用
             result_obj = self.llm.invoke(custom_prompt or "分析股票")
             response = result_obj.content
             
-            # 强制转换为字符串，解决 'list' 报错
+            # === [核心修复] 保留类型转换，防止 'list' 类型报错 ===
             if isinstance(response, list):
                 response = "\n".join([str(x.get('text', x) if isinstance(x, dict) else x) for x in response])
             else:
                 response = str(response)
+            # ===============================================
 
-            # 解析评分
+            # 1. 解析评分和建议
             score_match = re.search(r'评分[:：]\s*(\d+)', response)
             score = int(score_match.group(1)) if score_match else 50
             
-            # 解析建议
             advice_match = re.search(r'操作建议[:：]\s*\[?(.*?)\]?(\n|$)', response)
             advice = advice_match.group(1).strip() if advice_match else "观望"
 
+            # 2. 【新增】从 AI 回复中提取“核心观点”，用于填充 buy_reason 以满足通知系统
+            reason_match = re.search(r'核心观点[:：]\s*(.*?)(\n|$)', response)
+            reason = reason_match.group(1).strip() if reason_match else "见详细分析"
+
+            # 3. 返回 AnalysisResult (确保 dataclass 定义中也补齐了这些字段)
             return AnalysisResult(
                 code=context.get('code', 'Unknown'),
                 name=context.get('stock_name', 'Unknown'),
                 date=context.get('date', ''),
                 sentiment_score=score,
                 operation_advice=advice,
-                risk_alert="见分析",
-                trend_prediction="见分析",
-                analysis_summary=response
+                risk_alert="见总结",
+                trend_prediction="见总结",
+                analysis_summary=response,
+                buy_reason=reason,  # 适配 notification.py
+                sell_reason=reason  # 适配 notification.py
             )
         except Exception as e:
-            logger.error(f"AI 分析异常: {e}")
+            logger.error(f"AI 解析异常: {e}")
             return None
