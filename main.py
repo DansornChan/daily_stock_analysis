@@ -204,43 +204,67 @@ class StockAnalysisPipeline:
             return False
 
     def process_single_stock(self, code: str, skip_analysis: bool = False, single_notify: bool = False) -> Optional[AnalysisResult]:
-        """处理单只股票全流程"""
-        logger.info(f"========== 开始处理 {code} ==========")
+        """处理单只 A 股全流程 (适配纯数字代码)"""
         
-        # 1. 准备基础数据
-        if not self.fetch_and_save_stock_data(code):
+        # 1. 代码预处理：确保是纯数字字符串
+        # 兼容处理：有些代码可能被误写成 'sh601068' 或 '601068.SS'，我们要提取其中的数字
+        import re
+        match = re.search(r'\d{6}', code)
+        if not match:
+            logger.warning(f"[{code}] 非标准 A 股代码格式，跳过处理")
             return None
-            
-        if skip_analysis: return None
-
+        
+        fetch_code = match.group(0)
+        logger.info(f"========== 开始处理 A 股: {fetch_code} ==========")
+        
         try:
-            # 2. 准备分析素材
-            clean_code = code.split('.')[0]
-            stock_info = self.portfolio.get(clean_code, {"name": code, "sector": "Unknown", "code": code})
+            # 2. 尝试获取并保存行情数据
+            # 增加 3 秒休眠，彻底解决你之前遇到的 'RemoteDisconnected' 被封锁问题
+            time.sleep(3) 
+            data_success = self.fetch_and_save_stock_data(fetch_code)
             
-            # 获取行情并计算指标
-            df, _ = self.fetcher_manager.get_daily_data(code, days=100)
-            tech_data = self._calculate_technical_indicators(df)
+            if not data_success:
+                logger.warning(f"[{fetch_code}] 实时数据抓取失败，尝试从数据库调取历史数据...")
             
-            # 获取宏观情报
-            trend_context = self._get_trend_radar_context(code)
+            if skip_analysis: return None
+
+            # 3. 准备 AI 分析素材
+            # 从 portfolio.json 中获取该股票的配置（如持仓策略、板块等）
+            stock_info = self.portfolio.get(fetch_code, {
+                "name": f"A股{fetch_code}", 
+                "sector": DEFAULT_SECTOR, 
+                "strategy": "未定义"
+            })
             
-            # 3. 生成 Prompt 并分析
+            # 获取 DataFrame 并计算 MACD/RSI/均线等硬指标
+            try:
+                # days=100 确保有足够数据计算 MA60 和完整的 MACD
+                df, _ = self.fetcher_manager.get_daily_data(fetch_code, days=100)
+                tech_data = self._calculate_technical_indicators(df)
+            except Exception as e:
+                logger.error(f"[{fetch_code}] 技术指标计算失败 (可能数据量不足): {e}")
+                return None
+            
+            # 4. 获取 TrendRadar 提供的宏观与行业背景
+            trend_context = self._get_trend_radar_context(fetch_code)
+            
+            # 5. 生成 CIO 深度分析 Prompt (自上而下逻辑)
             prompt = self.analyzer.generate_cio_prompt(stock_info, tech_data, trend_context)
             
-            base_context = {'code': code, 'stock_name': stock_info['name'], 'date': date.today().strftime('%Y-%m-%d')}
+            base_context = {
+                'code': fetch_code, 
+                'stock_name': stock_info.get('name', fetch_code), 
+                'date': date.today().strftime('%Y-%m-%d')
+            }
+            
+            # 6. 调用 Gemini 进行分析 (此前已修复 list 类型错误)
             result = self.analyzer.analyze(base_context, custom_prompt=prompt)
             
-            if result:
-                logger.info(f"[{code}] 分析完成: 评分 {result.sentiment_score} - {result.operation_advice}")
-                if single_notify and self.notifier.is_available():
-                    self.notifier.send(self.notifier.generate_single_stock_report(result))
-           
-            # === [新增] 防止 API 429，每分析完一只休息 5 秒 ===
-            time.sleep(5) 
-            # ===============================================
-          
             return result
+            
+        except Exception as e:
+            logger.exception(f"[{fetch_code}] 整体分析流程发生异常: {e}")
+            return None
             
         except Exception as e:
             logger.exception(f"[{code}] 分析过程异常: {e}")
