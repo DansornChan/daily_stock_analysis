@@ -181,34 +181,60 @@ class StockAnalysisPipeline:
             logger.error(f"[{code}] 数据获取失败: {e}")
             return False
 
-    def process_single_stock(self, code: str, skip_analysis: bool = False, single_notify: bool = False) -> Optional[AnalysisResult]:
-        """处理单只 A 股全流程 (修复变量缺失版)"""
+   def process_single_stock(self, code: str, skip_analysis: bool = False, single_notify: bool = False) -> Optional[AnalysisResult]:
+        """处理单只 A 股全流程 (补全赋值逻辑版)"""
         match = re.search(r'\d{6}', code)
         if not match: return None
         fetch_code = match.group(0)
         
         logger.info(f"========== 开始处理 A 股: {fetch_code} ==========")
         try:
-            # 1. 抓取并持久化数据 (增加休眠防封)
+            # 1. 抓取数据并持久化
             time.sleep(3)
             self.fetch_and_save_stock_data(fetch_code)
             
             if skip_analysis: return None
 
-            # 2. 准备素材 (补全逻辑)
-            # A. 获取持仓/策略信息
+            # 2. 准备素材 (补全变量赋值逻辑，防止 NameError)
             stock_info = self.portfolio.get(fetch_code, {
                 "name": f"A股{fetch_code}", 
                 "sector": DEFAULT_SECTOR,
                 "code": fetch_code,
                 "strategy": "未定义"
             })
-            
-            # B. 获取 DataFrame 并计算硬核指标 (关键补全！)
+            if 'code' not in stock_info: stock_info['code'] = fetch_code
+
+            # 获取行情 DataFrame
             df, _ = self.fetcher_manager.get_daily_data(fetch_code, days=100)
             if df is None or df.empty:
-                logger.warning(f"[{fetch_code}] 无法计算指标：数据源返回为空")
+                logger.warning(f"[{fetch_code}] 无法计算指标：行情数据为空")
                 return None
+            
+            # === 核心：补全被删掉的变量定义 ===
+            tech_data = self._calculate_technical_indicators(df)
+            trend_context = self._get_trend_radar_context(fetch_code)
+            # ===============================
+
+            # 3. AI 分析
+            prompt = self.analyzer.generate_cio_prompt(stock_info, tech_data, trend_context)
+            base_context = {
+                'code': fetch_code, 
+                'stock_name': stock_info.get('name', fetch_code), 
+                'date': date.today().strftime('%Y-%m-%d')
+            }
+            
+            result = self.analyzer.analyze(base_context, custom_prompt=prompt)
+            
+            if result:
+                logger.info(f"[{fetch_code}] 分析完成: {result.operation_advice}")
+                # 限流控制
+                logger.info("等待 API 配额重置 (10s)...")
+                time.sleep(10)
+            
+            return result
+        except Exception as e:
+            logger.exception(f"[{fetch_code}] 流程发生异常: {e}")
+            return None
                 
             tech_data = self._calculate_technical_indicators(df)
             
