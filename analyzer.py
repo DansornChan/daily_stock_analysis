@@ -18,8 +18,8 @@ class AnalysisResult:
     risk_alert: str
     trend_prediction: str
     analysis_summary: str
-    buy_reason: str = ""    # 解决 AttributeError
-    sell_reason: str = ""   # 适配通知系统
+    buy_reason: str = ""    # 解决 AttributeError: buy_reason
+    sell_reason: str = ""   # 适配通知系统字段要求
     
     def get_emoji(self):
         if self.sentiment_score >= 80: return "🔴"
