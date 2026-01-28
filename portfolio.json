@@ -2,13 +2,13 @@
   "601068": {
     "name": "中铝国际",
     "sector": "Industrial",
-    "cost": 5.2,
+    "cost": 6.64,
     "strategy": "一带一路/工程基建"
   },
   "002241": {
     "name": "歌尔股份",
     "sector": "Industrial",
-    "cost": 1650.0,
+    "cost": 26.97,
     "strategy": "人工智能"
   }
 }
