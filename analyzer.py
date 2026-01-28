@@ -17,10 +17,10 @@ class AnalysisResult:
     operation_advice: str
     risk_alert: str
     trend_prediction: str
-    summary: str
+    analysis_summary: str  # <--- 修改点：从 summary 改为 analysis_summary
     
     def get_emoji(self):
-        if self.sentiment_score >= 80: return "🔴"  # 强力看多
+        if self.sentiment_score >= 80: return "🔴"  # 强烈看多
         if self.sentiment_score <= 40: return "🟢"  # 看空/风险
         return "🟡"  # 观望
 
@@ -36,13 +36,12 @@ class GeminiAnalyzer:
             self.llm = ChatGoogleGenerativeAI(
                 model=self.config.gemini_model,
                 google_api_key=self.api_key,
-                temperature=0.2, # 保持理性
+                temperature=0.2, 
                 timeout=60
             )
 
     def generate_cio_prompt(self, stock_info: dict, tech_data: dict, trend_context: dict) -> str:
         """生成 AI-CIO (首席投资官) 专用提示词"""
-        
         macro_text = trend_context.get('macro', '当前无重大宏观消息。')
         sector_text = trend_context.get('sector', '当前板块无重大特定消息。')
         
@@ -57,7 +56,7 @@ class GeminiAnalyzer:
         * **宏观环境**: {macro_text}
         * **{stock_info.get('sector', '未知')} 板块动态**: {sector_text}
 
-        ## B. 标的资产技术面 ({stock_info.get('name')} - {stock_info.get('code')})
+        ## B. 标地资产技术面 ({stock_info.get('name')} - {stock_info.get('code')})
         * **持仓策略**: {stock_info.get('strategy', '未定义')} (成本: {stock_info.get('cost', 0)})
         * **当前价格**: {tech_data.get('price', 'N/A')} (涨跌幅: {tech_data.get('change_pct', 0):.2f}%)
         * **趋势状态**: {tech_data.get('trend', '未知')}
@@ -80,13 +79,13 @@ class GeminiAnalyzer:
         * **持仓建议**: 现价距离成本价的位置，结合支撑压力位，盈亏比如何？
 
         ## 第三步：交易指令 (Output)
-        请输出最终决策，严格包含以下字段：
-        1. **核心观点**: 一句话总结（如"宏观逆风下的技术反弹，建议减仓"）。
-        2. **评分**: 0-100分 (50为中性)。
+        请输出最终决策，必须包含：
+        1. **核心观点**: 一句话总结。
+        2. **评分**: 0-100分。
         3. **操作建议**: [强力买入/逢低吸纳/持有观望/逢高减仓/清仓止损]。
-        4. **关键点位**: 建议的买入区间、严格止损位。
+        4. **关键点位**: 止损位、阻力位。
         
-        请用**专业、犀利、客观**的金融术语回答，拒绝模棱两可。
+        请用**专业、犀利、客观**的金融术语回答。
         """
         return prompt
 
@@ -95,33 +94,27 @@ class GeminiAnalyzer:
             return None
             
         try:
-            # 优先使用 CIO 模式的 Prompt
             if custom_prompt:
                 final_prompt = custom_prompt
             else:
-                # 兼容旧逻辑
-                base_prompt = f"分析股票 {context.get('code')}..."
-                final_prompt = base_prompt
+                return None
 
             # 调用 AI
             result_obj = self.llm.invoke(final_prompt)
             response = result_obj.content
             
-            # === [关键修复] 处理 LangChain 返回类型不一致问题 ===
+            # 类型转换修复
             if isinstance(response, list):
-                # 如果是列表（由多个文本块组成），将其合并为纯字符串
                 response = "\n".join([str(item) for item in response])
             elif not isinstance(response, str):
-                # 如果既不是列表也不是字符串，强制转为字符串
                 response = str(response)
-            # ================================================
             
-            # 解析 AI 返回 (提取评分和建议)
+            # 解析 AI 返回
             score_match = re.search(r'评分[:：]\s*(\d+)', response)
             score = int(score_match.group(1)) if score_match else 50
             
             advice_match = re.search(r'操作建议[:：]\s*\[?(.*?)\]?', response)
-            advice = advice_match.group(1) if advice_match else "观望"
+            advice = advice_match.group(1).strip() if advice_match else "观望"
 
             return AnalysisResult(
                 code=context.get('code', 'Unknown'),
@@ -129,9 +122,9 @@ class GeminiAnalyzer:
                 date=context.get('date', ''),
                 sentiment_score=score,
                 operation_advice=advice,
-                risk_alert="详见分析",
-                trend_prediction="详见分析",
-                summary=response 
+                risk_alert="详见总结",
+                trend_prediction="详见总结",
+                analysis_summary=response  # <--- 修改点：从 summary 改为 analysis_summary
             )
             
         except Exception as e:
