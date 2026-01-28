@@ -664,12 +664,14 @@ class NotificationService:
                         "",
                     ])
                 
-                # 风险提示
-                if result.risk_warning:
-                    report_lines.extend([
-                        f"**⚠️ 风险提示**: {result.risk_warning}",
-                        "",
-                    ])
+            # 风险提示
+            # 使用 getattr 安全获取，如果没有这个字段就默认是 None，不会报错
+            if getattr(result, 'risk_warning', None): 
+                report_lines.extend([
+                    f"**⚠️ 风险提示**: {getattr(result, 'risk_warning', '')}",
+                    "",
+                ])
+
                 
                 # 技术面分析
                 if result.ma_analysis or result.volume_analysis:
