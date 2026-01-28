@@ -99,6 +99,7 @@ class GeminiAnalyzer:
             if custom_prompt:
                 final_prompt = custom_prompt
             else:
+                # 兼容旧逻辑
                 base_prompt = f"分析股票 {context.get('code')}..."
                 final_prompt = base_prompt
 
@@ -106,14 +107,14 @@ class GeminiAnalyzer:
             result_obj = self.llm.invoke(final_prompt)
             response = result_obj.content
             
-            # === [关键修复] 处理可能的类型不一致问题 ===
+            # === [关键修复] 处理 LangChain 返回类型不一致问题 ===
             if isinstance(response, list):
-                # 如果是列表，将其合并为字符串
+                # 如果是列表（由多个文本块组成），将其合并为纯字符串
                 response = "\n".join([str(item) for item in response])
             elif not isinstance(response, str):
                 # 如果既不是列表也不是字符串，强制转为字符串
                 response = str(response)
-            # ==========================================
+            # ================================================
             
             # 解析 AI 返回 (提取评分和建议)
             score_match = re.search(r'评分[:：]\s*(\d+)', response)
