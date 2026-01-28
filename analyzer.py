@@ -17,7 +17,9 @@ class AnalysisResult:
     operation_advice: str
     risk_alert: str
     trend_prediction: str
-    analysis_summary: str  # <--- 统一命名，解决 AttributeError
+    analysis_summary: str
+    buy_reason: str = ""    # <--- 新增，适配通知系统
+    sell_reason: str = ""   # <--- 新增，适配通知系统
     
     def get_emoji(self):
         if self.sentiment_score >= 80: return "🔴"
