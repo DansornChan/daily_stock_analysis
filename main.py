@@ -235,7 +235,11 @@ class StockAnalysisPipeline:
                 logger.info(f"[{code}] 分析完成: 评分 {result.sentiment_score} - {result.operation_advice}")
                 if single_notify and self.notifier.is_available():
                     self.notifier.send(self.notifier.generate_single_stock_report(result))
-            
+           
+            # === [新增] 防止 API 429，每分析完一只休息 5 秒 ===
+            time.sleep(5) 
+            # ===============================================
+          
             return result
             
         except Exception as e:
