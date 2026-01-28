@@ -263,7 +263,18 @@ class StockAnalysisPipeline:
             
             # 6. 调用 Gemini 进行分析 (此前已修复 list 类型错误)
             result = self.analyzer.analyze(base_context, custom_prompt=prompt)
+          
+            # ... 在 result = self.analyzer.analyze(...) 之后 ...
+            if result:
+                logger.info(f"[{fetch_code}] 分析完成")
+                
+            # === [新增] 严格限流：每只股票分析完强行等 10 秒 ===
+         
+            if not skip_analysis:
+                logger.info("等待 API 配额重置 (10s)...")
+                time.sleep(10)
             
+            return result
             return result
             
         except Exception as e:
