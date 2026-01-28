@@ -182,43 +182,63 @@ class StockAnalysisPipeline:
             return False
 
     def process_single_stock(self, code: str, skip_analysis: bool = False, single_notify: bool = False) -> Optional[AnalysisResult]:
-        """处理单只 A 股全流程"""
+        """处理单只 A 股全流程 (修复变量缺失版)"""
         match = re.search(r'\d{6}', code)
         if not match: return None
         fetch_code = match.group(0)
         
         logger.info(f"========== 开始处理 A 股: {fetch_code} ==========")
         try:
-            # 1. 抓取数据 (增加休眠防封)
+            # 1. 抓取并持久化数据 (增加休眠防封)
             time.sleep(3)
             self.fetch_and_save_stock_data(fetch_code)
             
             if skip_analysis: return None
 
-            # 2. 准备素材
+            # 2. 准备素材 (补全逻辑)
+            # A. 获取持仓/策略信息
             stock_info = self.portfolio.get(fetch_code, {
                 "name": f"A股{fetch_code}", 
                 "sector": DEFAULT_SECTOR,
-                "code": fetch_code,  # <--- 补上缺失的 code 字段
+                "code": fetch_code,
                 "strategy": "未定义"
             })
             
+            # B. 获取 DataFrame 并计算硬核指标 (关键补全！)
+            df, _ = self.fetcher_manager.get_daily_data(fetch_code, days=100)
+            if df is None or df.empty:
+                logger.warning(f"[{fetch_code}] 无法计算指标：数据源返回为空")
+                return None
+                
+            tech_data = self._calculate_technical_indicators(df)
+            
+            # C. 加载 TrendRadar 宏观背景 (关键补全！)
+            trend_context = self._get_trend_radar_context(fetch_code)
+            
             # 3. AI 分析
             prompt = self.analyzer.generate_cio_prompt(stock_info, tech_data, trend_context)
-            base_context = {'code': fetch_code, 'stock_name': stock_info.get('name', fetch_code), 'date': date.today().strftime('%Y-%m-%d')}
+            base_context = {
+                'code': fetch_code, 
+                'stock_name': stock_info.get('name', fetch_code), 
+                'date': date.today().strftime('%Y-%m-%d')
+            }
+            
             result = self.analyzer.analyze(base_context, custom_prompt=prompt)
             
             if result:
                 logger.info(f"[{fetch_code}] 分析完成: {result.operation_advice}")
-                if single_notify: self.notifier.send(self.notifier.generate_single_stock_report(result))
+                # 只有在 main.run 中指定了单股推送才会触发
+                if single_notify: 
+                    self.notifier.send(self.notifier.generate_single_stock_report(result))
                 
-                # 限流：分析完强行等 10 秒
+                # 严格限流：给 API 留出 10 秒冷却时间
                 logger.info("等待 API 配额重置 (10s)...")
                 time.sleep(10)
             
             return result
+            
         except Exception as e:
-            logger.exception(f"[{fetch_code}] 处理异常: {e}")
+            logger.exception(f"[{fetch_code}] 流程发生异常: {e}")
             return None
 
     def run(self, stock_codes: Optional[List[str]] = None, dry_run: bool = False, send_notification: bool = True) -> List[AnalysisResult]:
