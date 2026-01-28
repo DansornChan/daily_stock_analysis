@@ -1,38 +1,14 @@
 {
-  "603098": {
-    "name": "森特股份",
+  "601068": {
+    "name": "中铝国际",
     "sector": "Industrial",
-    "cost": 15.2,
-    "strategy": "BIPV龙头/困境反转"
+    "cost": 5.2,
+    "strategy": "一带一路/工程基建"
   },
-  "NVDA": {
-    "name": "Nvidia",
-    "sector": "Tech",
-    "cost": 450.0,
-    "strategy": "AI算力垄断"
-  },
-  "TSLA": {
-    "name": "Tesla",
-    "sector": "Auto",
-    "cost": 180.0,
-    "strategy": "FSD/机器人预期"
-  },
-  "00700": {
-    "name": "腾讯控股",
-    "sector": "Tech",
-    "cost": 300.0,
-    "strategy": "现金流奶牛/回购"
-  },
-  "AAPL": {
-    "name": "Apple",
-    "sector": "Tech",
-    "cost": 0,
-    "strategy": "消费电子护城河"
-  },
-  "SPY": {
-    "name": "S&P 500",
-    "sector": "Macro",
-    "cost": 0,
-    "strategy": "宏观锚点"
+  "600519": {
+    "name": "贵州茅台",
+    "sector": "Consumer",
+    "cost": 1650.0,
+    "strategy": "价值防守"
   }
 }
