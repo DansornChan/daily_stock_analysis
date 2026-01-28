@@ -68,10 +68,14 @@ DEFAULT_SECTOR = "Macro"
 class StockAnalysisPipeline:
     def __init__(self, config: Optional[Config] = None, max_workers: Optional[int] = None):
         self.config = config or get_config()
-        self.max_workers = max_workers or self.config.max_workers
         
-        # === 核心：加载投资组合配置 ===
-        self.portfolio = self._load_portfolio_config()
+        # === [关键修复] 优先读取环境变量，确保 YAML 配置生效 ===
+        env_workers = os.getenv("MAX_CONCURRENT")
+        if env_workers:
+            self.max_workers = int(env_workers)
+        else:
+            self.max_workers = max_workers or self.config.max_workers or 1
+        # ===================================================
         
         # 初始化模块
         self.db = get_db()
