@@ -5,10 +5,10 @@
     "cost": 5.2,
     "strategy": "一带一路/工程基建"
   },
-  "600519": {
-    "name": "贵州茅台",
-    "sector": "Consumer",
+  "002241": {
+    "name": "歌尔股份",
+    "sector": "Industrial",
     "cost": 1650.0,
-    "strategy": "价值防守"
+    "strategy": "人工智能"
   }
 }
