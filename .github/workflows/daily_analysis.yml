@@ -1,16 +1,16 @@
 name: 每日股票分析
 
 on:
-  # 1. 监听文件变化 (新增的)
+  # 1. 监听文件变化 (新增的，用于 Telegram 触发)
   push:
     paths:
       - 'portfolio.json'
 
-  # 2. 定时触发 (原来的)
+  # 2. 定时触发 (原来的，每天下午6点)
   schedule:
     - cron: '0 10 * * 1-5'
   
-  # 3. 手动触发 (原来的)
+  # 3. 手动触发 (原来的，用于测试)
   workflow_dispatch:
     inputs:
       mode:
@@ -31,20 +31,16 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
       
-      # === 【新增步骤】下载 TrendRadar 的新闻数据 ===
       - name: 下载 TrendRadar 新闻数据
         uses: dawidd6/action-download-artifact@v2
         with:
-          # 如果是私有仓库，需要配置 PAT (Personal Access Token)
-          # github_token: ${{ secrets.YOUR_PAT }} 
-          github_token: ${{ secrets.GITHUB_TOKEN }} # 如果是公开仓库或同一账号下
-          workflow: crawler.yml        # 对方仓库里 workflow 的文件名
-          repo: DansornChan/danstrendrader  # 对方仓库全名
-          name: news-summary-json      # 刚才在上游起的名字
-          path: .                      # 下载到当前根目录 (main.py 会在这里找)
-          search_artifacts: true       # 搜索最新的
-        continue-on-error: true        # 关键！下载失败不要报错，继续跑股票分析
-      # ==========================================
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: crawler.yml
+          repo: DansornChan/danstrendrader
+          name: news-summary-json
+          path: .
+          search_artifacts: true
+        continue-on-error: true
 
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
@@ -59,37 +55,27 @@ jobs:
       
       - name: 创建必要目录
         run: |
-          mkdir -p data logs reports output # 顺便确保 output 目录存在
+          mkdir -p data logs reports output
       
       - name: 执行股票分析
         env:
-          # Gemini AI
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
           GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
-          # 建议将延迟提高到 10.0 以配合 Gemini 免费版的 RPM 限制
-          GEMINI_REQUEST_DELAY: '10.0'  
-          
-          # 数据源与搜索服务
+          GEMINI_REQUEST_DELAY: '10.0'
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           BOCHA_API_KEYS: ${{ secrets.BOCHA_API_KEYS }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           SERPAPI_API_KEYS: ${{ secrets.SERPAPI_API_KEYS }}
-          
-          # 通知渠道
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_FOLDER_TOKEN: ${{ secrets.FEISHU_FOLDER_TOKEN }}
-          
-          # 自选股列表
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || '600519' }}
-          
-          # 其他配置
           LOG_LEVEL: INFO
           DATA_DAYS: 60
-          MAX_CONCURRENT: 1  # 强制单线程运行
+          MAX_CONCURRENT: 1
         run: |
           # 1. 判断运行模式
           MODE="${{ github.event.inputs.mode || 'full' }}"
