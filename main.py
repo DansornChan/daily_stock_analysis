@@ -57,7 +57,9 @@ class StockAnalysisPipeline:
         env_workers = os.getenv("MAX_CONCURRENT")
         self.max_workers = int(env_workers) if env_workers else (max_workers or self.config.max_workers or 1)
 
+        # 加载持仓配置（核心修复点）
         self.portfolio = self._load_portfolio_config()
+        
         self.db = get_db()
         self.fetcher_manager = DataFetcherManager()
         self.analyzer = GeminiAnalyzer()
@@ -65,9 +67,13 @@ class StockAnalysisPipeline:
 
         logger.info(f"AI-CIO 初始化完成 | 并发数={self.max_workers}")
 
-    # ---------- 配置 ----------
+    # ---------- 配置加载（兼容 List 和 Dict） ----------
 
     def _load_portfolio_config(self) -> dict:
+        """
+        读取 portfolio.json，并确保返回字典格式。
+        兼容旧版 List 格式 ["600519"] 和新版 Dict 格式 {"600519": {"cost": 100...}}
+        """
         path = "portfolio.json"
         if not os.path.exists(path):
             return {}
@@ -75,27 +81,41 @@ class StockAnalysisPipeline:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 
-                # === 兼容性处理 ===
-                # 如果是旧版列表，转为带默认值的字典
+                # 情况A: 如果是旧版列表 (List)，转为带默认值的字典
                 if isinstance(data, list):
                     return {
-                        str(code): {"code": str(code), "cost": 0, "shares": 0, "name": f"股票{code}"} 
+                        str(code): {
+                            "code": str(code), 
+                            "cost": 0, 
+                            "shares": 0, 
+                            "name": f"股票{code}", 
+                            "sector": "Unknown"
+                        } 
                         for code in data
                     }
                 
-                # 如果是新版字典，确保每个条目都有 code 字段
-                final_data = {}
-                for code, info in data.items():
-                    info["code"] = str(code)
-                    info.setdefault("cost", 0)
-                    info.setdefault("shares", 0)
-                    final_data[str(code)] = info
-                return final_data
+                # 情况B: 如果是新版字典 (Dict)，进行标准化处理
+                if isinstance(data, dict):
+                    final_data = {}
+                    for code, info in data.items():
+                        # 确保 info 是字典，不是 null
+                        if not isinstance(info, dict):
+                            info = {}
+                        
+                        info["code"] = str(code)
+                        info.setdefault("cost", 0)
+                        info.setdefault("shares", 0)
+                        info.setdefault("name", f"股票{code}")
+                        info.setdefault("sector", "Unknown")
+                        
+                        final_data[str(code)] = info
+                    return final_data
+                
+                return {}
                 
         except Exception as e:
             logger.error(f"加载 portfolio.json 失败: {e}")
             return {}
-
 
     # ---------- 新闻上下文 ----------
 
@@ -185,6 +205,7 @@ class StockAnalysisPipeline:
     # ---------- 单股处理 ----------
 
     def process_single_stock(self, code: str, dry_run: bool = False) -> Optional[AnalysisResult]:
+        # 1. 提取6位数字代码
         match = re.search(r"\d{6}", code)
         if not match:
             return None
@@ -195,6 +216,7 @@ class StockAnalysisPipeline:
         try:
             time.sleep(2)  # 轻量限流
 
+            # 2. 获取行情数据
             df = self.fetch_and_save_stock_data(stock_code)
             if df is None:
                 logger.error(f"[{stock_code}] 无行情数据，跳过")
@@ -204,14 +226,19 @@ class StockAnalysisPipeline:
                 logger.info(f"[{stock_code}] dry-run 模式，跳过 AI 分析")
                 return None
 
+            # 3. 获取个股配置信息 (包含成本、持仓等)
+            # 使用 get 获取，如果不存在则使用默认字典
             stock_info = self.portfolio.get(
-                stock_code, {"name": f"A股{stock_code}", "sector": DEFAULT_SECTOR}
+                stock_code, 
+                {"name": f"A股{stock_code}", "sector": DEFAULT_SECTOR, "cost": 0, "shares": 0}
             )
             stock_info.setdefault("code", stock_code)
 
+            # 4. 计算指标与准备 Prompt
             tech_data = self._calculate_technical_indicators(df)
             trend_context = self._get_trend_radar_context(stock_code)
 
+            # 5. 生成 Prompt (会将 stock_info 里的 cost/shares 传进去)
             prompt = self.analyzer.generate_cio_prompt(stock_info, tech_data, trend_context)
 
             context = {
@@ -220,6 +247,7 @@ class StockAnalysisPipeline:
                 "date": date.today().strftime("%Y-%m-%d"),
             }
 
+            # 6. 调用 AI
             result = self.analyzer.analyze(context, custom_prompt=prompt)
             if result is None:
                 logger.error(f"[{stock_code}] AI 返回为空，已丢弃")
@@ -241,11 +269,18 @@ class StockAnalysisPipeline:
         send_notification: bool = True,
     ) -> List[AnalysisResult]:
 
+        # 如果没有传入特定的 list，就从 portfolio 字典里取 keys
         if stock_codes is None:
-            # 这里调用 keys() 现在是安全的了，因为我们已经在 load 时转成了 dict
-            stock_codes = list(self.portfolio.keys()) if self.portfolio else self.config.stock_list
+            stock_codes = list(self.portfolio.keys()) if self.portfolio else []
+            # 如果本地配置也没有，则尝试读取环境变量的默认值
+            if not stock_codes:
+                stock_list_env = self.config.stock_list
+                if stock_list_env:
+                    stock_codes = [s.strip() for s in stock_list_env.split(",")]
 
         results: List[AnalysisResult] = []
+
+        logger.info(f"开始分析任务，目标列表: {stock_codes}")
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_map = {
@@ -281,12 +316,18 @@ def parse_arguments():
     parser.add_argument("--stocks", type=str)
     parser.add_argument("--no-notify", action="store_true")
     parser.add_argument("--workers", type=int)
+    parser.add_argument("--market-review", action="store_true", help="仅运行大盘复盘")
     return parser.parse_args()
 
 def main():
     args = parse_arguments()
     config = get_config()
     setup_logging(args.debug, config.log_dir)
+
+    # 简单的兼容性处理：如果是大盘复盘模式，暂时跳过
+    if args.market_review:
+        logger.info("当前模式为大盘复盘 (Market Review)，暂未实现具体逻辑，跳过。")
+        return 0
 
     stock_list = [s.strip() for s in args.stocks.split(",")] if args.stocks else None
 
