@@ -67,7 +67,7 @@ class StockAnalysisPipeline:
 
     # ---------- 配置 ----------
 
-        def _load_portfolio_config(self) -> dict:
+    def _load_portfolio_config(self) -> dict:
         path = "portfolio.json"
         if not os.path.exists(path):
             return {}
