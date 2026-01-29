@@ -80,6 +80,7 @@ MACD：{tech_data.get("macd", 0):.2f}
 
 【返回格式要求（必须严格遵守）】
 {{
+  "stock_name": "股票真实中文简称（例如：贵州茅台）",
   "sentiment_score": 0-100 的整数,
   "operation_advice": "强力买入 / 逢低吸纳 / 持有观望 / 逢高减仓 / 清仓止损",
   "core_view": "一句话核心判断",
@@ -122,6 +123,11 @@ MACD：{tech_data.get("macd", 0):.2f}
             json_text = content[json_start: json_end + 1]
             data = json.loads(json_text)
 
+            # === 自动纠正股票名称 ===
+            ai_name = data.get("stock_name")
+            final_name = ai_name if ai_name else context.get("stock_name", "Unknown")
+            # =====================
+
             score = int(data.get("sentiment_score", 50))
             score = max(0, min(100, score))
 
@@ -129,7 +135,7 @@ MACD：{tech_data.get("macd", 0):.2f}
 
             return AnalysisResult(
                 code=context.get("code", "Unknown"),
-                name=context.get("stock_name", "Unknown"),
+                name=final_name, # 使用 AI 识别的名称
                 date=context.get("date", ""),
                 sentiment_score=score,
                 operation_advice=data.get("operation_advice", "持有观望"),
