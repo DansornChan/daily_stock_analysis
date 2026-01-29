@@ -73,7 +73,14 @@ class StockAnalysisPipeline:
             return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                
+                # === 兼容性修复 ===
+                # 如果是列表（由 Telegram Bot 修改），转换为字典格式
+                if isinstance(data, list):
+                    return {str(code): {"code": str(code), "name": f"股票{str(code)}", "sector": "Unknown"} for code in data}
+                
+                return data
         except Exception as e:
             logger.error(f"加载 portfolio.json 失败: {e}")
             return {}
@@ -223,6 +230,7 @@ class StockAnalysisPipeline:
     ) -> List[AnalysisResult]:
 
         if stock_codes is None:
+            # 这里调用 keys() 现在是安全的了，因为我们已经在 load 时转成了 dict
             stock_codes = list(self.portfolio.keys()) if self.portfolio else self.config.stock_list
 
         results: List[AnalysisResult] = []
