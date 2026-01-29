@@ -51,7 +51,7 @@ class GeminiAnalyzer:
 
     # ---------- Prompt ----------
 
-        def generate_cio_prompt(
+    def generate_cio_prompt(
         self,
         stock_info: Dict[str, Any],
         tech_data: Dict[str, Any],
