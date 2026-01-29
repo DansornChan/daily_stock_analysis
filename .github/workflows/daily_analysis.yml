@@ -1,16 +1,16 @@
 name: 每日股票分析
 
 on:
-  # 1. 监听文件变化 (新增的，用于 Telegram 触发)
+  # 1. 监听文件变化 (Telegram 改文件后会自动触发这里)
   push:
     paths:
       - 'portfolio.json'
 
-  # 2. 定时触发 (原来的，每天下午6点)
+  # 2. 定时触发 - 每天北京时间 18:00 (UTC 10:00)
   schedule:
     - cron: '0 10 * * 1-5'
   
-  # 3. 手动触发 (原来的，用于测试)
+  # 3. 手动触发
   workflow_dispatch:
     inputs:
       mode:
@@ -19,9 +19,9 @@ on:
         default: 'full'
         type: choice
         options:
-          - full
-          - market-only
-          - stocks-only
+          - full          # 完整分析（股票+大盘）
+          - market-only   # 仅大盘复盘
+          - stocks-only   # 仅股票分析
 
 jobs:
   analyze:
@@ -31,6 +31,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
       
+      # === 下载 TrendRadar 的新闻数据 ===
       - name: 下载 TrendRadar 新闻数据
         uses: dawidd6/action-download-artifact@v2
         with:
@@ -59,20 +60,29 @@ jobs:
       
       - name: 执行股票分析
         env:
+          # Gemini AI
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
           GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
           GEMINI_REQUEST_DELAY: '10.0'
+          
+          # 数据源与搜索服务
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           BOCHA_API_KEYS: ${{ secrets.BOCHA_API_KEYS }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           SERPAPI_API_KEYS: ${{ secrets.SERPAPI_API_KEYS }}
+          
+          # 通知渠道
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_FOLDER_TOKEN: ${{ secrets.FEISHU_FOLDER_TOKEN }}
+          
+          # 自选股列表 (作为备用，主要读取 portfolio.json)
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || '600519' }}
+          
+          # 其他配置
           LOG_LEVEL: INFO
           DATA_DAYS: 60
           MAX_CONCURRENT: 1
@@ -83,7 +93,6 @@ jobs:
           echo "=========================================="
           echo "🚀 启动 AI-CIO 分析系统"
           echo "运行模式: $MODE"
-          echo "自选股: $STOCK_LIST"
           echo "时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
           
           # 2. 检查新闻文件状态
