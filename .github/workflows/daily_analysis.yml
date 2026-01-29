@@ -1,16 +1,11 @@
 name: 每日股票分析
 
 on:
-  # 1. 监听文件变化 (Telegram 改文件后会自动触发这里)
   push:
     paths:
       - 'portfolio.json'
-
-  # 2. 定时触发 - 每天北京时间 18:00 (UTC 10:00)
   schedule:
     - cron: '0 10 * * 1-5'
-  
-  # 3. 手动触发
   workflow_dispatch:
     inputs:
       mode:
@@ -19,19 +14,22 @@ on:
         default: 'full'
         type: choice
         options:
-          - full          # 完整分析（股票+大盘）
-          - market-only   # 仅大盘复盘
-          - stocks-only   # 仅股票分析
+          - full
+          - market-only
+          - stocks-only
+      # === 新增：接收单次代码 ===
+      stock_code:
+        description: '临时分析代码(可选)'
+        required: false
+      # ========================
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
       
-      # === 下载 TrendRadar 的新闻数据 ===
       - name: 下载 TrendRadar 新闻数据
         uses: dawidd6/action-download-artifact@v2
         with:
@@ -60,52 +58,47 @@ jobs:
       
       - name: 执行股票分析
         env:
-          # Gemini AI
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
           GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
           GEMINI_REQUEST_DELAY: '10.0'
-          
-          # 数据源与搜索服务
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           BOCHA_API_KEYS: ${{ secrets.BOCHA_API_KEYS }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           SERPAPI_API_KEYS: ${{ secrets.SERPAPI_API_KEYS }}
-          
-          # 通知渠道
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_FOLDER_TOKEN: ${{ secrets.FEISHU_FOLDER_TOKEN }}
-          
-          # 自选股列表 (作为备用，主要读取 portfolio.json)
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || '600519' }}
-          
-          # 其他配置
           LOG_LEVEL: INFO
           DATA_DAYS: 60
           MAX_CONCURRENT: 1
         run: |
-          # 1. 判断运行模式
           MODE="${{ github.event.inputs.mode || 'full' }}"
+          # === 获取临时代码 ===
+          ONETIME_CODE="${{ github.event.inputs.stock_code }}"
           
           echo "=========================================="
           echo "🚀 启动 AI-CIO 分析系统"
-          echo "运行模式: $MODE"
           echo "时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
           
-          # 2. 检查新闻文件状态
           if [ -f "news_summary.json" ]; then
-            echo "✅ 成功检测到 TrendRadar 新闻数据文件"
-            ls -lh news_summary.json
+            echo "✅ 检测到新闻数据"
           else
-            echo "⚠️ 未检测到新闻文件，分析将缺少宏观背景支持"
+            echo "⚠️ 未检测到新闻数据"
           fi
           echo "=========================================="
           
-          # 3. 执行分析程序
-          if [ "$MODE" = "market-only" ]; then
+          # === 逻辑判断 ===
+          # 1. 如果有临时代码，优先只跑这一只
+          if [ -n "$ONETIME_CODE" ]; then
+            echo "🎯 单次狙击模式: $ONETIME_CODE"
+            python main.py --stocks "$ONETIME_CODE" --workers 1
+            
+          # 2. 否则按原有模式跑
+          elif [ "$MODE" = "market-only" ]; then
             python main.py --market-review
           elif [ "$MODE" = "stocks-only" ]; then
             python main.py --workers 1
@@ -122,14 +115,3 @@ jobs:
             reports/
             logs/
           retention-days: 30
-      
-      - name: 显示运行结果
-        if: always()
-        run: |
-          echo "=========================================="
-          echo "分析完成"
-          echo "=========================================="
-          if [ -d "reports" ]; then
-            echo "生成的报告:"
-            ls -la reports/
-          fi
