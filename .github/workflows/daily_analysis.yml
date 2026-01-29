@@ -104,11 +104,11 @@ jobs:
           fi
           echo "=========================================="
           
-          # 3. 执行分析程序 (仅执行一次，且显式指定 --workers 1)
+          # 3. 执行分析程序
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review
-                elif [ "$MODE" = "stocks-only" ]; then
-        python main.py --workers 1
+          elif [ "$MODE" = "stocks-only" ]; then
+            python main.py --workers 1
           else
             python main.py --workers 1
           fi
