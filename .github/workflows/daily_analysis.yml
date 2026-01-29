@@ -1,23 +1,16 @@
 name: 每日股票分析
 
 on:
-  # === 新增这段 ===
+  # 1. 监听文件变化 (新增的)
   push:
     paths:
-      - 'portfolio.json'  # 只有这个文件变动时才触发
-  # ===============
-  
+      - 'portfolio.json'
+
+  # 2. 定时触发 (原来的)
   schedule:
     - cron: '0 10 * * 1-5'
-  workflow_dispatch:
-    inputs:
-    # ...
-on:
-  # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
-  schedule:
-    - cron: '0 10 * * 1-5'  # 周一到周五，UTC 10:00 = 北京时间 18:00
   
-  # 手动触发
+  # 3. 手动触发 (原来的)
   workflow_dispatch:
     inputs:
       mode:
@@ -26,9 +19,9 @@ on:
         default: 'full'
         type: choice
         options:
-          - full          # 完整分析（股票+大盘）
-          - market-only   # 仅大盘复盘
-          - stocks-only   # 仅股票分析
+          - full
+          - market-only
+          - stocks-only
 
 jobs:
   analyze:
