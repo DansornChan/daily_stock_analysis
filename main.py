@@ -67,7 +67,7 @@ class StockAnalysisPipeline:
 
     # ---------- 配置 ----------
 
-    def _load_portfolio_config(self) -> dict:
+        def _load_portfolio_config(self) -> dict:
         path = "portfolio.json"
         if not os.path.exists(path):
             return {}
@@ -75,15 +75,27 @@ class StockAnalysisPipeline:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 
-                # === 兼容性修复 ===
-                # 如果是列表（由 Telegram Bot 修改），转换为字典格式
+                # === 兼容性处理 ===
+                # 如果是旧版列表，转为带默认值的字典
                 if isinstance(data, list):
-                    return {str(code): {"code": str(code), "name": f"股票{str(code)}", "sector": "Unknown"} for code in data}
+                    return {
+                        str(code): {"code": str(code), "cost": 0, "shares": 0, "name": f"股票{code}"} 
+                        for code in data
+                    }
                 
-                return data
+                # 如果是新版字典，确保每个条目都有 code 字段
+                final_data = {}
+                for code, info in data.items():
+                    info["code"] = str(code)
+                    info.setdefault("cost", 0)
+                    info.setdefault("shares", 0)
+                    final_data[str(code)] = info
+                return final_data
+                
         except Exception as e:
             logger.error(f"加载 portfolio.json 失败: {e}")
             return {}
+
 
     # ---------- 新闻上下文 ----------
 
