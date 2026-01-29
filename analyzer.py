@@ -51,7 +51,7 @@ class GeminiAnalyzer:
 
     # ---------- Prompt ----------
 
-    def generate_cio_prompt(
+        def generate_cio_prompt(
         self,
         stock_info: Dict[str, Any],
         tech_data: Dict[str, Any],
@@ -59,6 +59,30 @@ class GeminiAnalyzer:
     ) -> str:
         stock_name = stock_info.get("name", "未知股票")
         stock_code = stock_info.get("code", "Unknown")
+        
+        # === 获取持仓信息 ===
+        cost = float(stock_info.get("cost", 0))
+        shares = int(stock_info.get("shares", 0))
+        current_price = float(tech_data.get("price", 0))
+        
+        # 计算持仓状态字符串
+        position_context = ""
+        if shares > 0 and cost > 0 and current_price > 0:
+            profit_pct = (current_price - cost) / cost * 100
+            status_str = "盈利" if profit_pct > 0 else "亏损"
+            position_context = (
+                f"【用户持仓状态】\n"
+                f"用户当前持有该股 {shares} 股，持仓成本 {cost} 元。\n"
+                f"当前浮动{status_str}比例：{profit_pct:.2f}%。\n"
+                f"请基于此持仓状态给出具体操作建议（是应该止盈、止损、补仓做T还是继续持有？）。"
+            )
+        else:
+            position_context = (
+                "【用户持仓状态】\n"
+                "用户当前为空仓（无持仓）。\n"
+                "请基于空仓视角给出建议（当前是否为合适的建仓时机？如果是，建议什么价格区间介入？）。"
+            )
+        # ==================
 
         return f"""
 你是一位经验丰富、风控优先的基金经理（CIO）。
@@ -78,17 +102,20 @@ MA5 / MA20 / MA60：{tech_data.get("ma5", 0):.2f} / {tech_data.get("ma20", 0):.2
 RSI：{tech_data.get("rsi", 0):.2f}
 MACD：{tech_data.get("macd", 0):.2f}
 
+{position_context}
+
 【返回格式要求（必须严格遵守）】
 {{
-  "stock_name": "股票真实中文简称（例如：贵州茅台）",
+  "stock_name": "股票真实中文简称",
   "sentiment_score": 0-100 的整数,
-  "operation_advice": "强力买入 / 逢低吸纳 / 持有观望 / 逢高减仓 / 清仓止损",
+  "operation_advice": "结合持仓状态的操作建议（如：亏损5%请耐心持有/盈利10%建议分批止盈/空仓建议观望）",
   "core_view": "一句话核心判断",
-  "analysis_summary": "完整分析逻辑，包含宏观 + 行业 + 技术面",
+  "analysis_summary": "完整分析逻辑，必须包含对当前持仓（或空仓）的操作指导",
   "risk_alert": "主要风险提示",
   "trend_prediction": "未来 1-4 周趋势判断"
 }}
 """
+
 
     # ---------- 核心分析 ----------
 
