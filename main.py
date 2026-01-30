@@ -55,11 +55,10 @@ class StockAnalysisPipeline:
         self.config = config or get_config()
 
         env_workers = os.getenv("MAX_CONCURRENT")
-        self.max_workers = int(env_workers) if env_workers else (max_workers or self.config.max_workers or 1)
+        # 强制默认单线程，避免触发 Gemini 免费版 API 速率限制 (429)
+        self.max_workers = int(env_workers) if env_workers else 1
 
-        # 加载持仓配置（核心修复点）
         self.portfolio = self._load_portfolio_config()
-        
         self.db = get_db()
         self.fetcher_manager = DataFetcherManager()
         self.analyzer = GeminiAnalyzer()
@@ -72,7 +71,7 @@ class StockAnalysisPipeline:
     def _load_portfolio_config(self) -> dict:
         """
         读取 portfolio.json，并确保返回字典格式。
-        兼容旧版 List 格式 ["600519"] 和新版 Dict 格式 {"600519": {"cost": 100...}}
+        即使 JSON 里没有 name，后续也会自动填充。
         """
         path = "portfolio.json"
         if not os.path.exists(path):
@@ -81,31 +80,31 @@ class StockAnalysisPipeline:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 
-                # 情况A: 如果是旧版列表 (List)，转为带默认值的字典
+                # 情况A: 旧版列表格式 ["600519"]
                 if isinstance(data, list):
                     return {
                         str(code): {
                             "code": str(code), 
                             "cost": 0, 
                             "shares": 0, 
-                            "name": f"股票{code}", 
+                            "name": f"股票{code}",  # 临时名，稍后会被覆盖
                             "sector": "Unknown"
                         } 
                         for code in data
                     }
                 
-                # 情况B: 如果是新版字典 (Dict)，进行标准化处理
+                # 情况B: 新版字典格式
                 if isinstance(data, dict):
                     final_data = {}
                     for code, info in data.items():
-                        # 确保 info 是字典，不是 null
                         if not isinstance(info, dict):
                             info = {}
                         
                         info["code"] = str(code)
                         info.setdefault("cost", 0)
                         info.setdefault("shares", 0)
-                        info.setdefault("name", f"股票{code}")
+                        # 这里给个默认名，防止 process_single_stock 里获取失败时报错
+                        info.setdefault("name", f"股票{code}") 
                         info.setdefault("sector", "Unknown")
                         
                         final_data[str(code)] = info
@@ -167,7 +166,7 @@ class StockAnalysisPipeline:
             delta = close.diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
             loss = -delta.where(delta < 0, 0).rolling(14).mean()
-            # 避免除以零
+            
             if loss.iloc[-1] == 0:
                 rsi = 100
             else:
@@ -207,7 +206,7 @@ class StockAnalysisPipeline:
             logger.error(f"[{code}] 行情抓取失败: {e}")
             return None
 
-    # ---------- 单股处理 ----------
+    # ---------- 单股处理 (关键修改：自动提取名称) ----------
 
     def process_single_stock(self, code: str, dry_run: bool = False) -> Optional[AnalysisResult]:
         # 1. 提取6位数字代码
@@ -223,27 +222,37 @@ class StockAnalysisPipeline:
 
             # 2. 获取行情数据
             df = self.fetch_and_save_stock_data(stock_code)
-            if df is None:
-                logger.error(f"[{stock_code}] 无行情数据，跳过")
+            if df is None or df.empty:
+                logger.error(f"[{stock_code}] 数据为空，跳过分析")
                 return None
 
             if dry_run:
                 logger.info(f"[{stock_code}] dry-run 模式，跳过 AI 分析")
                 return None
 
-            # 3. 获取个股配置信息 (包含成本、持仓等)
-            # 使用 get 获取，如果不存在则使用默认字典
+            # 3. 准备上下文 (包含持仓信息)
+            default_name = f"股票{stock_code}"
             stock_info = self.portfolio.get(
                 stock_code, 
-                {"name": f"A股{stock_code}", "sector": DEFAULT_SECTOR, "cost": 0, "shares": 0}
+                {"name": default_name, "sector": DEFAULT_SECTOR, "cost": 0, "shares": 0}
             )
             stock_info.setdefault("code", stock_code)
+
+            # === 🟢 自动补全名称逻辑 ===
+            # Efinance 数据源通常包含 "股票名称" 列
+            if "股票名称" in df.columns:
+                real_name = str(df.iloc[-1]["股票名称"])
+                # 如果当前配置的名字是默认的(股票xxxx)或空的，就用抓取到的真名覆盖
+                if stock_info.get("name") == default_name or not stock_info.get("name"):
+                    logger.info(f"[{stock_code}] 自动识别股票名称: {real_name}")
+                    stock_info["name"] = real_name
+            # =========================
 
             # 4. 计算指标与准备 Prompt
             tech_data = self._calculate_technical_indicators(df)
             trend_context = self._get_trend_radar_context(stock_code)
 
-            # 5. 生成 Prompt (会将 stock_info 里的 cost/shares 传进去)
+            # 生成 Prompt (此时 stock_info['name'] 已经是真名了)
             prompt = self.analyzer.generate_cio_prompt(stock_info, tech_data, trend_context)
 
             context = {
@@ -252,7 +261,7 @@ class StockAnalysisPipeline:
                 "date": date.today().strftime("%Y-%m-%d"),
             }
 
-            # 6. 调用 AI
+            # 5. 调用 AI
             result = self.analyzer.analyze(context, custom_prompt=prompt)
             if result is None:
                 logger.error(f"[{stock_code}] AI 返回为空，已丢弃")
@@ -274,10 +283,8 @@ class StockAnalysisPipeline:
         send_notification: bool = True,
     ) -> List[AnalysisResult]:
 
-        # 如果没有传入特定的 list，就从 portfolio 字典里取 keys
         if stock_codes is None:
             stock_codes = list(self.portfolio.keys()) if self.portfolio else []
-            # 如果本地配置也没有，则尝试读取环境变量的默认值
             if not stock_codes:
                 stock_list_env = self.config.stock_list
                 if stock_list_env:
@@ -287,19 +294,21 @@ class StockAnalysisPipeline:
 
         logger.info(f"开始分析任务，目标列表: {stock_codes}")
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_map = {
-                executor.submit(self.process_single_stock, code, dry_run): code
-                for code in stock_codes
-            }
+        # 🟢 关键修改：取消并发，改为串行执行，并增加强制冷却时间
+        # 即使 max_workers=1，使用 ThreadPool 还是不如直接 for 循环容易控制 sleep
+        for i, code in enumerate(stock_codes):
+            try:
+                res = self.process_single_stock(code, dry_run)
+                if res:
+                    results.append(res)
+                
+                # 🟢 强制冷却：除了最后一个，每跑完一个休息 15 秒，防止 429 报错
+                if i < len(stock_codes) - 1:
+                    logger.info("⏳ 触发 API 冷却保护，等待 15 秒...")
+                    time.sleep(15)
 
-            for future in as_completed(future_map):
-                try:
-                    res = future.result()
-                    if res:
-                        results.append(res)
-                except Exception as e:
-                    logger.exception(f"子线程异常: {e}")
+            except Exception as e:
+                logger.exception(f"处理 {code} 时发生未知错误: {e}")
 
         if results and send_notification and not dry_run:
             try:
@@ -329,14 +338,14 @@ def main():
     config = get_config()
     setup_logging(args.debug, config.log_dir)
 
-    # 简单的兼容性处理：如果是大盘复盘模式，暂时跳过
     if args.market_review:
         logger.info("当前模式为大盘复盘 (Market Review)，暂未实现具体逻辑，跳过。")
         return 0
 
     stock_list = [s.strip() for s in args.stocks.split(",")] if args.stocks else None
 
-    pipeline = StockAnalysisPipeline(config, max_workers=args.workers)
+    # 强制使用单线程逻辑 (max_workers=1 其实在类初始化时已处理，这里只是形式)
+    pipeline = StockAnalysisPipeline(config, max_workers=1)
     pipeline.run(
         stock_codes=stock_list,
         dry_run=args.dry_run,
