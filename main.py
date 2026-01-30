@@ -33,7 +33,7 @@ def setup_logging(debug: bool = False, log_dir: str = "./logs") -> None:
     log_file = log_path / f"stock_analysis_{today_str}.log"
 
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(logging.DEBUG if debug else logging.INFO)
     root_logger.handlers = []
 
     console_handler = logging.StreamHandler(sys.stdout)
@@ -167,7 +167,12 @@ class StockAnalysisPipeline:
             delta = close.diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
             loss = -delta.where(delta < 0, 0).rolling(14).mean()
-            rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
+            # 避免除以零
+            if loss.iloc[-1] == 0:
+                rsi = 100
+            else:
+                rs = gain / loss
+                rsi = 100 - (100 / (1 + rs)).iloc[-1]
 
             exp12 = close.ewm(span=12, adjust=False).mean()
             exp26 = close.ewm(span=26, adjust=False).mean()
