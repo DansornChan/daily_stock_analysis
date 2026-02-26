@@ -132,7 +132,12 @@ class DeepSeekAnalyzer:
         rsi = format_value(tech_data.get("rsi"))
         macd = format_value(tech_data.get("macd"))
         support = format_value(tech_data.get("support"))
+        support_distance_pct = format_value(tech_data.get("support_distance_pct"))
         resistance = format_value(tech_data.get("resistance"))
+        resistance_distance_pct = format_value(tech_data.get("resistance_distance_pct"))
+        money_flow_5d = format_value(tech_data.get("money_flow_5d"))
+        money_flow_20d = format_value(tech_data.get("money_flow_20d"))
+        money_flow_strength = format_value(tech_data.get("money_flow_strength"))
         
         # 构建提示词
         prompt = f"""
@@ -157,7 +162,13 @@ class DeepSeekAnalyzer:
 MACD：{macd}
 关键技术位：
   - 支撑位：{support}
+  - 距离支撑位：{support_distance_pct}%
   - 阻力位：{resistance}
+  - 距离阻力位：{resistance_distance_pct}%
+资金信号：
+  - 近5日净资金流（估算）：{money_flow_5d}
+  - 近20日净资金流（估算）：{money_flow_20d}
+  - 资金强度（5日净流/5日均额）：{money_flow_strength}
 
 === 用户持仓情况 ===
 {position_context}
@@ -169,10 +180,16 @@ MACD：{macd}
   "sentiment_score": 0-100的整数（80+积极，40-谨慎，中间中性）,
   "operation_advice": "具体的操作建议（如：加仓、减仓、持有、观望等）",
   "core_view": "一句话核心逻辑",
-  "analysis_summary": "详细分析（结合持仓和当前市场环境）",
+  "analysis_summary": "详细分析（必须结合：撑压位置、资金进出、持仓成本、新闻政策面）",
+  "position_advice": "围绕当前持仓给出增持/减持/持有建议与仓位理由（若空仓给出分批建仓建议）",
   "risk_alert": "需要关注的主要风险",
   "trend_prediction": "未来1周走势预测"
 }}
+
+请重点说明：
+1) 当前价与支撑/压力的距离对风险收益比的影响；
+2) 资金净流入/流出与趋势是否共振；
+3) 若用户有持仓成本，是否应增持、减持、还是继续持有，并给出触发条件。
 
 请确保只返回有效的JSON格式，不要包含其他解释性文字。
 """
@@ -278,7 +295,7 @@ MACD：{macd}
                 name=stock_name,
                 date=context.get("date", ""),
                 sentiment_score=score,
-                operation_advice=data.get("operation_advice", "观望"),
+                operation_advice=data.get("position_advice") or data.get("operation_advice", "观望"),
                 risk_alert=data.get("risk_alert", ""),
                 trend_prediction=data.get("trend_prediction", ""),
                 analysis_summary=data.get("analysis_summary", ""),
