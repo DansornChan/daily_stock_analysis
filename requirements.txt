@@ -59,4 +59,5 @@ python-multipart>=0.0.6     # 文件上传支持（WebUI用）
 fastapi>=0.104.0            # WebUI框架（可选）
 uvicorn[standard]>=0.24.0   # ASGI服务器（可选）
 
-tencent-stock-api>=0.1.3    # Priority 5: 腾讯财经数据
+# 可选：腾讯财经数据源（若 PyPI 无法安装可使用源码安装）
+# tencent-stock-api>=0.1.3
