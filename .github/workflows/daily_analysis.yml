@@ -126,4 +126,5 @@ jobs:
           path: |
             reports/
             logs/
+          if-no-files-found: ignore
           retention-days: 30

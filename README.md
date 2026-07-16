@@ -22,7 +22,7 @@
 - **🔄 多模型支持** - 支持 OpenAI 兼容 API（DeepSeek、通义千问等）作为备选
 
 ### 📊 数据来源
-- **行情数据**: AkShare（免费）、Tushare、Baostock、YFinance
+- **行情数据**: AkShare（免费）、Tushare、Baostock、YFinance、腾讯财经（tencent-stock-api）
 - **新闻搜索**: Tavily、SerpAPI、Bocha
 - **AI 分析**: 
   - 主力：Google Gemini（gemini-3-flash-preview）—— [免费获取](https://aistudio.google.com/)
@@ -103,6 +103,9 @@
 ### 方式二：本地运行 / Docker 部署
 
 > 📖 本地运行、Docker 部署详细步骤请参考 [完整配置指南](docs/full-guide.md)
+
+
+> 💡 腾讯财经代码格式说明：项目内部可继续使用 `600519` / `000001` / `hk00700`，系统会在 TencentFetcher 中自动转换为腾讯 API 需要的 `sh600519` / `sz000001` / `hk00700`。
 
 ## 📱 推送效果
 
@@ -195,7 +198,8 @@ daily_stock_analysis/
 │   ├── akshare_fetcher.py
 │   ├── tushare_fetcher.py
 │   ├── baostock_fetcher.py
-│   └── yfinance_fetcher.py
+│   ├── yfinance_fetcher.py
+│   └── tencent_fetcher.py
 ├── web/                 # WebUI 模块
 │   ├── server.py        # HTTP 服务器
 │   ├── router.py        # 路由管理
@@ -229,6 +233,7 @@ daily_stock_analysis/
 - [x] Tushare Pro
 - [x] Baostock
 - [x] YFinance
+- [x] 腾讯财经（tencent-stock-api）
 
 ### 🎯 功能增强
 - [x] 决策仪表盘

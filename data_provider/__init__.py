@@ -15,6 +15,7 @@
 3. TushareFetcher (Priority 2) - 来自 tushare 库
 4. BaostockFetcher (Priority 3) - 来自 baostock 库
 5. YfinanceFetcher (Priority 4) - 来自 yfinance 库
+6. TencentFetcher (Priority 5) - 来自 tencent-stock-api 库
 """
 
 from .base import BaseFetcher, DataFetcherManager
@@ -23,6 +24,11 @@ from .akshare_fetcher import AkshareFetcher
 from .tushare_fetcher import TushareFetcher
 from .baostock_fetcher import BaostockFetcher
 from .yfinance_fetcher import YfinanceFetcher
+
+try:
+    from .tencent_fetcher import TencentFetcher
+except ImportError:  # pragma: no cover
+    TencentFetcher = None
 
 __all__ = [
     'BaseFetcher',

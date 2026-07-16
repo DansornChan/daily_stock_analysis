@@ -196,19 +196,78 @@ class StockAnalysisPipeline:
     # ---------- 技术指标 ----------
 
     def _calculate_technical_indicators(self, df: pd.DataFrame) -> dict:
-        df = df.sort_values("date")
-        close = df["close"]
+        df = df.sort_values("date").copy()
+        close = pd.to_numeric(df["close"], errors="coerce")
+        high = pd.to_numeric(df["high"], errors="coerce")
+        low = pd.to_numeric(df["low"], errors="coerce")
+        volume = pd.to_numeric(df.get("volume", 0), errors="coerce").fillna(0)
+        amount = pd.to_numeric(df.get("amount", 0), errors="coerce").fillna(0)
+
+        current_price = float(close.iloc[-1])
+        support = float(low.tail(20).min())
+        resistance = float(high.tail(20).max())
+
+        support_distance_pct = None
+        resistance_distance_pct = None
+        if current_price > 0:
+            support_distance_pct = (current_price - support) / current_price * 100
+            resistance_distance_pct = (resistance - current_price) / current_price * 100
+
+        # 简化版资金流向：上涨日成交额-下跌日成交额（近5日/20日）
+        price_change = close.diff().fillna(0)
+        signed_amount = amount.where(price_change >= 0, -amount)
+        money_flow_5d = float(signed_amount.tail(5).sum())
+        money_flow_20d = float(signed_amount.tail(20).sum())
+        avg_amount_5d = float(amount.tail(5).mean()) if len(amount) else 0.0
+        money_flow_strength = (money_flow_5d / avg_amount_5d) if avg_amount_5d else 0.0
 
         return {
-            "price": close.iloc[-1],
+            "price": current_price,
             "ma5": close.rolling(5).mean().iloc[-1],
             "ma20": close.rolling(20).mean().iloc[-1],
             "ma60": close.rolling(60).mean().iloc[-1],
             "rsi": None,
             "macd": None,
-            "support": df["low"].tail(20).min(),
-            "resistance": df["high"].tail(20).max(),
+            "support": support,
+            "support_distance_pct": support_distance_pct,
+            "resistance": resistance,
+            "resistance_distance_pct": resistance_distance_pct,
+            "money_flow_5d": money_flow_5d,
+            "money_flow_20d": money_flow_20d,
+            "money_flow_strength": money_flow_strength,
+            "volume_mean_5d": float(volume.tail(5).mean()) if len(volume) else 0.0,
         }
+
+
+    def _build_trend_context(self, stock_info: dict, asset_code: str) -> dict:
+        """构建新闻/政策面上下文（可选，失败不影响主流程）。"""
+        target_sector = stock_info.get("sector", DEFAULT_SECTOR)
+        context = {
+            "macro": "暂无显著宏观政策新闻，建议结合盘面实时跟踪。",
+            "sector": f"{target_sector}暂无显著政策催化，需观察后续公告与行业数据。",
+            "target_sector": target_sector,
+        }
+
+        try:
+            from search_service import get_search_service
+
+            search_service = get_search_service()
+            if not search_service or not search_service.is_available:
+                return context
+
+            response = search_service.search_stock_news(
+                stock_code=asset_code,
+                stock_name=stock_info.get("name", f"资产{asset_code}"),
+                max_results=3,
+            )
+            if response.success and response.results:
+                snippets = [f"{item.title}：{item.snippet}" for item in response.results[:3]]
+                context["sector"] = "；".join(snippets)
+                context["macro"] = "请重点提炼上述新闻中的政策导向、监管表态与行业支持/约束信号。"
+        except Exception as e:
+            logger.debug(f"新闻/政策上下文构建失败，使用默认上下文: {e}")
+
+        return context
 
     # ---------- 单资产处理 ----------
 
@@ -280,7 +339,13 @@ class StockAnalysisPipeline:
                 "rsi": None,
                 "macd": None,
                 "support": None,
+                "support_distance_pct": None,
                 "resistance": None,
+                "resistance_distance_pct": None,
+                "money_flow_5d": None,
+                "money_flow_20d": None,
+                "money_flow_strength": None,
+                "volume_mean_5d": None,
             }
 
         if realtime_data.get("price") is not None:
@@ -295,7 +360,7 @@ class StockAnalysisPipeline:
             base_prompt = self.analyzer.generate_cio_prompt(
                 stock_info,
                 tech_data,
-                {"macro": "", "sector": "", "target_sector": "Macro"},
+                self._build_trend_context(stock_info, asset_code),
             )
 
             context = {
